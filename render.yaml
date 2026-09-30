@@ -1,0 +1,25 @@
+# Render blueprint for the standalone Napoleon API.
+#
+# This is deliberately independent of Spectra's render.yaml — different service,
+# different database, no shared secrets.
+services:
+  - type: web
+    name: napoleon-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: free
+    region: oregon
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: napoleon-db
+          property: connectionString
+      - key: CORS_ORIGIN
+        sync: false
+
+databases:
+  - name: napoleon-db
+    plan: free
+    region: oregon

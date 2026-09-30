@@ -1,0 +1,209 @@
+// Napoleon — standalone operational intelligence.
+//
+// This schema is owned by Napoleon alone. It has no relation to Spectra's
+// database: Napoleon is fed through its own ingest endpoints and can be dropped
+// into any environment with `prisma db push`.
+//
+// Field names deliberately mirror the shape the engine reads (site.name,
+// guard.performanceScore, incident.reportedAt, ...), so the intelligence code
+// stays a pure function of the rows rather than being entangled with one
+// product's full domain model.
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tenancy and access
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// The tenant boundary. Every row Napoleon can read belongs to exactly one
+/// organization, and every request is scoped to the organization its API key
+/// resolves to.
+model Organization {
+  id        String   @id @default(uuid())
+  name      String
+  slug      String   @unique
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  apiKeys       ApiKey[]
+  sites         Site[]
+  guards        Guard[]
+  conversations Conversation[]
+}
+
+/// Machine credential. Napoleon has no user accounts — it is a service, so an
+/// organization is accessed by API key only.
+///
+/// `scope` gates privilege: ADMIN can manage keys and ingest, READ can only
+/// read analysis. A leaked READ key therefore cannot rewrite your data.
+model ApiKey {
+  id             String   @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  keyHash        String   @unique // sha256 of the plaintext; the key itself is never stored
+  prefix         String
+  scope          String   @default("READ") // "ADMIN" | "READ"
+  isActive       Boolean  @default(true)
+  lastUsedAt     DateTime?
+  createdAt      DateTime @default(now())
+
+  @@index([organizationId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Operational records — what Napoleon reasons about
+//
+// Each table carries an `externalId`: the caller's own identifier. Upserts key
+// on (organizationId, externalId), so a client can replay the same record
+// idempotently without coordinating on our internal uuids. The primary key
+// stays internal, which is what stops one tenant from colliding with another's
+// identifiers.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Site {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  externalId     String
+  name           String
+  riskLevel      String       @default("LOW") // "LOW" | "MEDIUM" | "HIGH" | "CRITICAL"
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  guards       Guard[]       @relation("SiteGuards")
+  attendances  Attendance[]
+  incidents    Incident[]
+  patrolRoutes PatrolRoute[]
+
+  @@unique([organizationId, externalId])
+  @@index([organizationId])
+}
+
+model Guard {
+  id               String   @id @default(uuid())
+  organizationId   String
+  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  externalId       String
+  fullName         String
+  status           String   @default("ACTIVE") // "ACTIVE" | "INACTIVE" | "SUSPENDED" | "ON_LEAVE"
+  performanceScore Float    @default(100)
+  currentShift     String   @default("DAY") // "DAY" | "NIGHT" | "OFF"
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  assignedSiteId String?
+  assignedSite   Site?   @relation("SiteGuards", fields: [assignedSiteId], references: [id])
+
+  attendances   Attendance[]
+  patrolRecords PatrolRecord[]
+
+  @@unique([organizationId, externalId])
+  @@index([organizationId, status])
+}
+
+model Incident {
+  id         String   @id @default(uuid())
+  siteId     String
+  site       Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  externalId String
+  /// Caller-defined category, e.g. "THEFT", "TRESPASS", "FIRE".
+  type       String?
+  severity   String   // "LOW" | "MEDIUM" | "HIGH" | "CRITICAL"
+  status     String   @default("OPEN") // "OPEN" | "CLOSED" | "RESOLVED"
+  reportedAt DateTime
+  createdAt  DateTime @default(now())
+
+  @@unique([siteId, externalId])
+  @@index([siteId, reportedAt])
+  @@index([status])
+  @@index([reportedAt])
+}
+
+model Attendance {
+  id             String   @id @default(uuid())
+  guardId        String
+  guard          Guard    @relation(fields: [guardId], references: [id], onDelete: Cascade)
+  siteId         String
+  site           Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  externalId     String
+  /// When the check-in happened — the field the engine windows on.
+  createdAt      DateTime @default(now())
+  isLate         Boolean  @default(false)
+  isAbsent       Boolean  @default(false)
+  /// "ON_TIME" | "LATE" | "ABSENT" | "FLAGGED" (flagged = outside the geofence)
+  status         String   @default("ON_TIME")
+
+  @@unique([guardId, externalId])
+  @@index([guardId, createdAt])
+  @@index([siteId, createdAt])
+}
+
+model PatrolRoute {
+  id         String   @id @default(uuid())
+  siteId     String
+  site       Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  externalId String
+  name       String?
+  createdAt  DateTime @default(now())
+
+  records PatrolRecord[]
+
+  @@unique([siteId, externalId])
+}
+
+model PatrolRecord {
+  id                   String      @id @default(uuid())
+  routeId              String
+  route                PatrolRoute @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  guardId              String
+  guard                Guard       @relation(fields: [guardId], references: [id], onDelete: Cascade)
+  externalId           String
+  completionPercentage Float       @default(0)
+  createdAt            DateTime    @default(now())
+
+  @@unique([guardId, externalId])
+  @@index([guardId, createdAt])
+  @@index([routeId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Conversations — transcripts of the OpenAI-compatible surface
+//
+// Kept because which sites get scrutinised is itself signal, and because a
+// learned ranking model will need a record of what was shown and when.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Conversation {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  title          String
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  messages Message[]
+
+  @@index([organizationId, updatedAt])
+}
+
+model Message {
+  id             String       @id @default(uuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  role           String // "system" | "user" | "assistant"
+  content        String
+  intent         String?
+  tokens         Int          @default(0)
+  createdAt      DateTime     @default(now())
+
+  @@index([conversationId, createdAt])
+}

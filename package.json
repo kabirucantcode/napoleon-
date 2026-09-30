@@ -1,0 +1,45 @@
+{
+  "name": "napoleon-api",
+  "version": "0.1.0",
+  "description": "Napoleon — standalone operational intelligence API. Ingest sites, guards, incidents, attendance and patrols; get health, per-site risk, at-risk personnel, and ranked anomaly scores. Ships an OpenAI-compatible endpoint so any chat client can consume it.",
+  "license": "UNLICENSED",
+  "private": true,
+  "engines": {
+    "node": "22.x"
+  },
+  "scripts": {
+    "build": "nest build",
+    "start": "nest start",
+    "start:dev": "nest start --watch",
+    "start:prod": "node dist/main",
+    "prisma:generate": "prisma generate",
+    "prisma:push": "prisma db push",
+    "bootstrap": "node scripts/bootstrap.js",
+    "smoke": "node scripts/smoke-all.js",
+    "smoke:engine": "node scripts/smoke-engine.js",
+    "smoke:anomaly": "node scripts/smoke-anomaly.js",
+    "smoke:openai": "node scripts/smoke-openai.js",
+    "smoke:auth": "node scripts/smoke-auth.js",
+    "smoke:ingest": "node scripts/smoke-ingest.js"
+  },
+  "dependencies": {
+    "@nestjs/common": "^11.0.1",
+    "@nestjs/core": "^11.0.1",
+    "@nestjs/platform-express": "^11.0.1",
+    "@prisma/client": "^6.19.3",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.15.1",
+    "dotenv": "^17.4.2",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1"
+  },
+  "devDependencies": {
+    "@nestjs/cli": "^11.0.0",
+    "@nestjs/schematics": "^11.0.0",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.0.0",
+    "prisma": "^6.19.3",
+    "ts-loader": "^9.5.2",
+    "typescript": "^5.7.3"
+  }
+}

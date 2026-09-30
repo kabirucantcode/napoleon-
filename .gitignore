@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.env
+.env.local
+
+# The repository root ignores `.env.*`, which would swallow the example file
+# this project ships as its configuration documentation. Un-ignore it.
+!.env.example
+
+*.log
+.DS_Store
+tsconfig.build.tsbuildinfo
