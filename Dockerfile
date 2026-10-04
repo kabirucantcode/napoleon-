@@ -7,7 +7,7 @@ WORKDIR /app
 RUN apt-get update -y && apt-get install -y --no-install-recommends openssl \
   && rm -rf /var/lib/apt/lists/*
 
-COPY package.json package-lock.json* ./
+COPY package*.json ./
 RUN npm install --no-audit --no-fund
 
 COPY prisma ./prisma
@@ -25,7 +25,10 @@ ENV NODE_ENV=production
 RUN apt-get update -y && apt-get install -y --no-install-recommends openssl \
   && rm -rf /var/lib/apt/lists/*
 
-COPY package.json package-lock.json* ./
+# `prisma` is a runtime dependency, not a dev one: the command below runs the CLI
+# on every boot. With it in devDependencies, `--omit=dev` strips it and the
+# container fails to start.
+COPY package*.json ./
 RUN npm install --omit=dev --no-audit --no-fund
 
 # The generated client is a build artefact, so carry it across explicitly.
