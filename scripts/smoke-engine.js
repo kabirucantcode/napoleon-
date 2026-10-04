@@ -209,6 +209,60 @@ async function main() {
   check('reliability accounts for late days', bola.reliability === 0, bola.reliability);
   check('a no-history guard is treated as fully reliable', chidi.reliability === 100, chidi.reliability);
 
+  // ── Empty and partial data ────────────────────────────────────────────────
+  boot('empty state');
+  {
+    const none = { findMany: async () => [] };
+    const emptyEngine = new InsightsService({
+      site: none,
+      guard: none,
+      incident: none,
+      attendance: none,
+      patrolRecord: none,
+      patrolRoute: none,
+    });
+    const empty = await emptyEngine.getOverview(ORG);
+    check('an organization with no records reports EMPTY', empty.dataStatus === 'EMPTY', empty.dataStatus);
+    check('no health score is claimed', empty.healthScore === 0, empty.healthScore);
+    check(
+      'no metric failure is invented from absent data',
+      !empty.insights.some((i) => ['PATROLS', 'ATTENDANCE', 'PERSONNEL'].includes(i.category)),
+      JSON.stringify(empty.insights.map((i) => i.category)),
+    );
+    check('exactly one guidance insight is returned', empty.insights.length === 1, empty.insights.length);
+    check(
+      'the guidance says how to start',
+      /ingest/i.test(empty.insights[0].recommendation),
+      empty.insights[0].recommendation,
+    );
+  }
+
+  boot('partial state');
+  {
+    // Everything except patrol history: the organization exists and is staffed,
+    // it simply has no patrol data yet.
+    const partialEngine = new InsightsService({
+      ...prisma,
+      patrolRecord: { findMany: async () => [] },
+    });
+    const partial = await partialEngine.getOverview(ORG);
+    check('a missing source downgrades to PARTIAL', partial.dataStatus === 'PARTIAL', partial.dataStatus);
+    check(
+      'absent patrol history does not raise a PATROLS failure',
+      !partial.insights.some((i) => i.category === 'PATROLS'),
+      JSON.stringify(partial.insights.map((i) => i.category)),
+    );
+    check('health is still scored over the inputs that exist', partial.healthScore > 0, partial.healthScore);
+    check(
+      'the score is renormalised, not penalised by the missing source',
+      partial.healthScore >= 60,
+      partial.healthScore,
+    );
+  }
+
+  boot('full state');
+  check('all four sources present reports OK', overview.dataStatus === 'OK', overview.dataStatus);
+
   summary();
 }
 

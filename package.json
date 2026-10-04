@@ -20,7 +20,8 @@
     "smoke:anomaly": "node scripts/smoke-anomaly.js",
     "smoke:openai": "node scripts/smoke-openai.js",
     "smoke:auth": "node scripts/smoke-auth.js",
-    "smoke:ingest": "node scripts/smoke-ingest.js"
+    "smoke:ingest": "node scripts/smoke-ingest.js",
+    "smoke:sdk": "node scripts/smoke-sdk.js"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",

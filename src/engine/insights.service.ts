@@ -35,6 +35,38 @@ export class InsightsService {
     return d;
   }
 
+  /**
+   * How much of the picture we actually have.
+   *
+   * `EMPTY` means nothing has been ingested, so no metric should be reported at
+   * all — a health score of 0 there would read as a catastrophe rather than an
+   * absence of data. `PARTIAL` means some inputs are present but not all, so
+   * the score is computed over what exists and the caller should not compare it
+   * to a fully-instrumented organization.
+   */
+  private dataStatus(input: {
+    sites: unknown[];
+    guards: unknown[];
+    incidents: unknown[];
+    attendance: unknown[];
+    patrols: unknown[];
+  }): 'EMPTY' | 'PARTIAL' | 'OK' {
+    const any =
+      input.sites.length > 0 ||
+      input.guards.length > 0 ||
+      input.incidents.length > 0 ||
+      input.attendance.length > 0 ||
+      input.patrols.length > 0;
+    if (!any) return 'EMPTY';
+
+    const all =
+      input.sites.length > 0 &&
+      input.guards.length > 0 &&
+      input.attendance.length > 0 &&
+      input.patrols.length > 0;
+    return all ? 'OK' : 'PARTIAL';
+  }
+
   // ── Public surface ────────────────────────────────────────────────────────
 
   async getOverview(organizationId: string) {
@@ -87,12 +119,39 @@ export class InsightsService {
         : patrols.reduce((s, p) => s + p.completionPercentage, 0) /
           patrols.length;
 
-    const healthScore = clamp(
-      avgPerformance * 0.4 +
-        (100 - openIncidents * 3) * 0.25 +
-        (100 - lateRate) * 0.2 +
-        patrolCompletion * 0.15,
-    );
+    const dataStatus = this.dataStatus({
+      sites,
+      guards,
+      incidents,
+      attendance,
+      patrols,
+    });
+
+    // Score only the components that actually have data behind them, then
+    // renormalise. Averaging a missing metric in as zero would report a patrol
+    // failure for an organization that has never run a patrol, and would drag
+    // the health score down for data that simply has not arrived yet.
+    const components: { value: number; weight: number }[] = [];
+    if (guards.length > 0) {
+      components.push({ value: avgPerformance, weight: 0.4 });
+    }
+    // Incident count is always meaningful: zero open incidents is a real result.
+    components.push({ value: 100 - openIncidents * 3, weight: 0.25 });
+    if (attendance.length > 0) {
+      components.push({ value: 100 - lateRate, weight: 0.2 });
+    }
+    if (patrols.length > 0) {
+      components.push({ value: patrolCompletion, weight: 0.15 });
+    }
+
+    const totalWeight = components.reduce((sum, c) => sum + c.weight, 0);
+    const healthScore =
+      dataStatus === 'EMPTY' || totalWeight === 0
+        ? 0
+        : clamp(
+            components.reduce((sum, c) => sum + c.value * c.weight, 0) /
+              totalWeight,
+          );
 
     const insights = await this.buildInsights(organizationId, {
       sites,
@@ -107,6 +166,7 @@ export class InsightsService {
 
     return {
       generatedAt: new Date().toISOString(),
+      dataStatus,
       healthScore,
       openIncidents,
       avgGuardPerformance: Math.round(avgPerformance),
@@ -368,6 +428,16 @@ export class InsightsService {
       metric: string;
     }[] = [];
 
+    // A metric with no rows behind it has no completion rate, no lateness rate
+    // and no performance problem. Firing on the default of zero would report a
+    // failure for work that has not happened rather than work that went badly.
+    const hasAnyData =
+      ctx.sites.length > 0 ||
+      ctx.guards.length > 0 ||
+      ctx.incidents.length > 0 ||
+      ctx.attendance.length > 0 ||
+      ctx.patrols.length > 0;
+
     const open = ctx.incidents.filter((i) => i.status === 'OPEN').length;
     if (open >= 3) {
       insights.push({
@@ -381,7 +451,7 @@ export class InsightsService {
       });
     }
 
-    if (ctx.lateRate > 20) {
+    if (ctx.attendance.length > 0 && ctx.lateRate > 20) {
       insights.push({
         severity: 'MEDIUM',
         category: 'ATTENDANCE',
@@ -394,7 +464,7 @@ export class InsightsService {
       });
     }
 
-    if (ctx.patrolCompletion < 80) {
+    if (ctx.patrols.length > 0 && ctx.patrolCompletion < 80) {
       insights.push({
         severity: 'MEDIUM',
         category: 'PATROLS',
@@ -444,6 +514,19 @@ export class InsightsService {
     }
 
     if (insights.length === 0) {
+      if (!hasAnyData) {
+        insights.push({
+          severity: 'INFO',
+          category: 'HEALTH',
+          title: 'Nothing has been ingested yet',
+          detail:
+            'Napoleon holds no sites, personnel, incidents, attendance or patrols for this organization, so there is no behaviour to analyse and no score to report.',
+          recommendation:
+            'Send records to POST /api/v1/ingest/sites, then /guards, /incidents, /attendance and /patrols. The overview becomes meaningful as soon as the first data lands.',
+          metric: '0 records',
+        });
+        return insights;
+      }
       insights.push({
         severity: 'INFO',
         category: 'HEALTH',

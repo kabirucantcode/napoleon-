@@ -223,18 +223,37 @@ is estimated (~4 chars/token) because there is no tokenizer.
 Windows: 30 days for incidents, 14 for attendance and patrols.
 
 ```
-healthScore = clamp(
-  avgPerformance     × 0.40 +
-  (100 − open×3)     × 0.25 +
-  (100 − lateRate)   × 0.20 +
-  patrolCompletion   × 0.15
-)
+healthScore = weighted mean of the components that have data:
+  avgPerformance     × 0.40   (only if personnel exist)
+  (100 − open×3)     × 0.25   (always — zero open incidents is a real result)
+  (100 − lateRate)   × 0.20   (only if attendance exists)
+  patrolCompletion   × 0.15   (only if patrol history exists)
 ```
 
-Insights fire on: ≥3 open incidents (HIGH); late rate >20%; patrol completion
-<80%; >50% of incidents between 18:00–06:00; any personnel scoring below 60
-(HIGH when more than three). If nothing fires, one INFO insight says so rather
-than returning an empty list.
+**Absent data is excluded, not scored as zero.** A missing metric has no
+completion rate and no lateness rate; treating its default of `0` as a failure
+would report a patrol problem for an organization that has never run a patrol,
+and would drag the health score down for data that simply has not arrived yet.
+The remaining weights are renormalised, so the score still means "over the inputs
+I have".
+
+The response carries `dataStatus` so a caller knows how to read that score:
+
+| Value | Meaning |
+| --- | --- |
+| `OK` | Every input has data. The score is comparable. |
+| `PARTIAL` | Some inputs are empty. The score covers only what exists — do not compare it to a fully-instrumented organization. |
+| `EMPTY` | Nothing ingested. `healthScore` is `0` and no metric is meaningful. |
+
+An `EMPTY` organization and a catastrophic one both have numbers near zero and
+mean opposite things, which is why the flag exists rather than making callers
+infer it. On `EMPTY` the single insight explains what to send first, and the
+markdown surface prints "Nothing has been ingested yet" instead of a KPI table.
+
+Insights fire on: ≥3 open incidents (HIGH); late rate >20% (only with attendance
+data); patrol completion <80% (only with patrol data); >50% of incidents between
+18:00–06:00; any personnel scoring below 60 (HIGH when more than three). If
+nothing fires, one INFO insight says so rather than returning an empty list.
 
 ### Site risk (30 days)
 
@@ -256,9 +275,33 @@ Sites sort most exposed first, with `incidentCount30d`, `openIncidents30d`,
 MEDIUM/HIGH · `performanceScore < 60` → HIGH. Only non-LOW rows are returned,
 each with the human-readable reasons that put it there.
 
+## Client
+
+A zero-dependency client lives in [`sdk/`](sdk/), with the same namespaces as the
+API and correct paths (the Spectra-era client pointed at `/napoleon/*` and will
+404 against this service):
+
+```js
+const { NapoleonClient } = require('napoleon-client');
+
+const napoleon = new NapoleonClient({
+  baseUrl: 'https://your-host/api/v1',
+  apiKey: process.env.NAPOLEON_KEY,
+});
+
+await napoleon.ingest.sites([{ externalId: 'riverside', name: 'Riverside' }]);
+const health = await napoleon.insights.overview();
+if (health.dataStatus !== 'EMPTY') console.log(health.healthScore);
+```
+
+See [`sdk/README.md`](sdk/README.md) for the full surface, and
+`sdk/examples/quickstart.js` for an end-to-end walkthrough that ingests a small
+complete dataset and reads every view back.
+
 ## Layout
 
 ```
+sdk/                          zero-dependency client + types + example
 src/
   main.ts                     bootstrap, global prefix, CORS
   app.module.ts               four modules, nothing else
@@ -278,6 +321,8 @@ src/
     ingest.*                  writing records in
     intelligence.module.ts    everything a caller reads
     ingest.module.ts          everything a caller writes
+  scripts/                    bootstrap + the smoke suite
+prisma/schema.prisma
 ```
 
 `insights.service.ts` and `openai.renderer.ts` were ported from Spectra
@@ -293,11 +338,22 @@ npm run smoke
 ```
 
 The smoke suite stubs the database so the logic can be exercised without
-Postgres: the engine's arithmetic against a fixture (including windowing and
-organization scoping), the scoring math and prior shrinkage, the auth matrix and
-scope enforcement, the OpenAI envelope and SSE reassembly, and ingestion
-containment. It is the check that runs in CI without a database; it is not a
-substitute for one end-to-end run against real Postgres.
+Postgres:
+
+- **engine** — the arithmetic against a fixture, including windowing,
+  organization scoping, and the empty/partial-data behaviour
+- **anomaly** — scoring math, prior shrinkage, weekday awareness, `/analyze`
+  validation
+- **openai** — the envelope, SSE reassembly, error bodies, intent routing
+- **auth** — the credential matrix and scope enforcement, including that a `READ`
+  key cannot mint an `ADMIN` one
+- **ingest** — containment (another tenant's id is never resolvable), idempotent
+  upserts, chunking
+- **sdk** — every client method asserted against the server's method and path,
+  so a drifting route fails here rather than in someone's integration
+
+It is the check that runs in CI without a database. It is not a substitute for
+one end-to-end run against real Postgres.
 
 ## Deploying
 

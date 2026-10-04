@@ -197,7 +197,30 @@ export class OpenAiRenderer {
     o: Awaited<ReturnType<InsightsService['getOverview']>>,
   ): string {
     const lines: string[] = [];
+
+    // With nothing ingested there is no score and no rates, only a next step.
+    // Reporting "0/100" and "0% patrol completion" would describe a catastrophe
+    // rather than an empty database, and an operator cannot tell the two apart.
+    if (o.dataStatus === 'EMPTY') {
+      lines.push('## Nothing has been ingested yet');
+      lines.push('');
+      for (const i of o.insights) {
+        lines.push(i.detail);
+        lines.push('');
+        lines.push(`→ ${i.recommendation}`);
+      }
+      lines.push('');
+      lines.push(this.footer(o.generatedAt));
+      return lines.join('\n');
+    }
+
     lines.push(`## Operational health: ${o.healthScore}/100`);
+    if (o.dataStatus === 'PARTIAL') {
+      lines.push('');
+      lines.push(
+        '_Based on the inputs available so far; some sources have no records yet, so this score is not comparable to a fully-instrumented organization._',
+      );
+    }
     lines.push('');
     lines.push('| Metric | Value |');
     lines.push('| --- | --- |');

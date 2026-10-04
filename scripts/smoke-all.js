@@ -19,6 +19,7 @@ const scripts = [
   'smoke-openai.js',
   'smoke-auth.js',
   'smoke-ingest.js',
+  'smoke-sdk.js',
 ];
 
 let failed = 0;

@@ -16,6 +16,7 @@ const { OpenAiController } = requireDist('modules/openai.controller');
 
 const overview = {
   generatedAt: '2026-09-29T10:00:00.000Z',
+  dataStatus: 'OK',
   healthScore: 78,
   openIncidents: 4,
   avgGuardPerformance: 72,
@@ -139,6 +140,36 @@ async function main() {
   check('an empty guard list reads sensibly', renderer.render('at_risk_guards', []).includes('No guards are flagged'));
   check('an empty site list reads sensibly', renderer.render('risk_by_site', []).includes('No sites'));
   check('an empty insight list is not possible, but a guard empty-state is stable', renderer.render('at_risk_guards', []).length > 40);
+
+  const partialMd = renderer.render('overview', { ...overview, dataStatus: 'PARTIAL' });
+  check('partial data is disclosed in the report', partialMd.includes('not comparable'), partialMd.slice(0, 200));
+  check('a partial report still shows the score', partialMd.includes('78/100'));
+
+  const emptyMd = renderer.render('overview', {
+    ...overview,
+    dataStatus: 'EMPTY',
+    healthScore: 0,
+    openIncidents: 0,
+    avgGuardPerformance: 0,
+    lateCheckInRate: 0,
+    patrolCompletionRate: 0,
+    atRiskGuardCount: 0,
+    siteCount: 0,
+    insights: [
+      {
+        severity: 'INFO',
+        category: 'HEALTH',
+        title: 'Nothing has been ingested yet',
+        detail: 'Napoleon holds no records for this organization.',
+        recommendation: 'Send records to POST /api/v1/ingest/sites first.',
+        metric: '0 records',
+      },
+    ],
+  });
+  check('an empty organization does not report a health score', !emptyMd.includes('/100'), emptyMd.slice(0, 120));
+  check('an empty organization says so plainly', emptyMd.includes('Nothing has been ingested'));
+  check('the empty state names the next step', emptyMd.includes('/ingest/sites'));
+  check('no KPI table is printed with no data', !emptyMd.includes('| Metric | Value |'));
 
   // ── Envelope ──────────────────────────────────────────────────────────────
   boot('chat.completion envelope');

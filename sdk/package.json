@@ -1,0 +1,26 @@
+{
+  "name": "napoleon-client",
+  "version": "0.1.0",
+  "description": "Client for the Napoleon operational intelligence API — ingest records, read health, site risk and flagged personnel, and score values against a history. Zero dependencies.",
+  "license": "UNLICENSED",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "README.md"
+  ],
+  "keywords": [
+    "napoleon",
+    "security",
+    "operations",
+    "anomaly-detection",
+    "api-client"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "example": "node examples/quickstart.js"
+  }
+}
