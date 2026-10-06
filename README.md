@@ -357,13 +357,53 @@ one end-to-end run against real Postgres.
 
 ## Deploying
 
-`Dockerfile` and `render.yaml` are included. The container runs
-`prisma db push` then the server, so a single service is enough. Once the schema
-is stable, switch to `prisma migrate deploy` and commit migrations.
+`Dockerfile` and `railway.json` are included. The container runs `prisma db push`
+then the server, so one service is enough.
 
-Set `DATABASE_URL` and, if a browser will call it, `CORS_ORIGIN` (comma
-separated). Server-to-server callers are unaffected by CORS — they do not
-preflight. Run `npm run bootstrap` once against the deployed database.
+### Railway
+
+Railway cannot declare a database from config, so the Postgres is a dashboard
+step rather than part of the repository:
+
+1. **New Project → Deploy from GitHub repo**, and pick this repository. Railway
+   reads `railway.json`, builds the `Dockerfile`, and injects `PORT`.
+2. **New → Database → Add PostgreSQL**, in the same project. Note what you name
+   it — the default is `Postgres`, and step 3 depends on that name.
+3. On the **app service**, add a variable:
+
+   ```
+   DATABASE_URL = ${{Postgres.DATABASE_URL}}
+   ```
+
+   That is Railway's reference syntax, so the internal connection string is
+   resolved at deploy time rather than copied by hand.
+4. Deploy. On boot the container pushes the schema, then serves. The health
+   check is `/api/v1/health` with a 300s timeout, which leaves room for that
+   first push.
+5. **Bootstrap once**, or the API is locked — there are no keys yet. Use the
+   database's *public* URL (enable public networking on the Postgres service if
+   the variables do not show `DATABASE_PUBLIC_URL`):
+
+   ```bash
+   DATABASE_URL='<DATABASE_PUBLIC_URL>' npm run bootstrap
+   ```
+
+   The printed key is the only way in; it is stored hashed and cannot be
+   retrieved again.
+
+Two things worth knowing before you rely on it:
+
+- **Do not enable serverless/sleep** on the app service. Napoleon is request/response
+  and idles cheaply; sleeping only buys cold starts on every first call.
+- **`db push` is not migration history.** It syncs the schema to the database,
+  which is what makes a single-service deploy simple. Once the schema is stable
+  and you care about auditable changes, switch the command to
+  `prisma migrate deploy` and commit migrations (`prisma migrate dev` generates
+  them locally).
+
+`CORS_ORIGIN` is unset by default, which disables CORS — correct for a
+server-to-server API, since server callers never preflight. Set it on the app
+service only if a browser will call this from another origin.
 
 ## Not included
 
