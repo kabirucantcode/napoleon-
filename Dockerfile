@@ -40,7 +40,13 @@ COPY scripts ./scripts
 
 EXPOSE 3010
 
-# Push the schema, then serve. `db push` keeps a single-service deploy simple;
-# switch to `prisma migrate deploy` once the schema is stable and you care about
-# migration history.
-CMD ["sh", "-c", "npx prisma db push --accept-data-loss && node dist/main"]
+# Preflight the one variable the container cannot run without. Without this, a
+# missing DATABASE_URL surfaces as a Prisma P1012 repeated on every restart,
+# which reads like a schema fault rather than an unset configuration value.
+# `printenv` exits non-zero when the variable is absent or empty, which keeps
+# this check free of shell interpolation.
+#
+# Then push the schema and serve. `db push` keeps a single-service deploy
+# simple; switch to `prisma migrate deploy` once the schema is stable and you
+# care about migration history.
+CMD printenv DATABASE_URL | grep -q . || { echo 'FATAL: DATABASE_URL is not set. Add an environment variable named DATABASE_URL whose value is your Postgres connection string, then redeploy. On Railway: add a PostgreSQL service, then set DATABASE_URL on this service to the reference variable pointing at it.'; exit 1; }; npx prisma db push --accept-data-loss && node dist/main
